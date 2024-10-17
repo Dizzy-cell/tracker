@@ -206,7 +206,8 @@ class Tracker(object):
             },
             'img_size': self.image_size.clone().detach().cpu().numpy()[0],
             'frame_id': frame_id,
-            'global_step': self.global_step
+            'global_step': self.global_step,
+            'loss': self.loss_all
         }
 
         vertices, _, _ = self.flame(
@@ -226,14 +227,30 @@ class Tracker(object):
 
     def save_canonical(self):
         canon = os.path.join(self.save_folder, self.actor_name, "canonical.obj")
+        canon_mouth = os.path.join(self.save_folder, self.actor_name, "canonical_mouth.obj")
         if not os.path.exists(canon):
             from scipy.spatial.transform import Rotation as R
             rotvec = np.zeros(3)
             rotvec[0] = 12.0 * np.pi / 180.0
             jaw = matrix_to_rotation_6d(torch.from_numpy(R.from_rotvec(rotvec).as_matrix())[None, ...].cuda()).float()
-            vertices = self.flame(cameras=torch.inverse(self.cameras.R), shape_params=self.shape, jaw_pose_params=jaw)[0].detach()
-            faces = self.diff_renderer.faces[0].cpu().numpy()
-            trimesh.Trimesh(faces=faces, vertices=vertices[0].cpu().numpy(), process=False).export(canon)
+            vertices, lmk68, lmkMP = self.flame(cameras=torch.inverse(self.cameras.R), shape_params=self.shape, jaw_pose_params=jaw)
+
+            v= vertices[0].detach().cpu().numpy()   
+            f = self.diff_renderer.faces[0].cpu().numpy()
+
+            list = [i for i in range(4, 13) ] + [i for i in range(48, 68)] # 68 key points 
+            v_mouth = lmk68[0, list,:].detach().cpu().numpy()
+            from scipy.spatial import Delaunay
+            tri = Delaunay(v_mouth[:,[0,1]])
+            f_mouth = tri.simplices
+
+            v_m, f_m = trimesh.remesh.subdivide_to_size(v_mouth, f_mouth, max_edge=0.01)
+            trimesh.Trimesh(faces=f_m, vertices=v_m, process=False).export(canon_mouth)
+
+            f = np.concatenate([f, f_m + 5023])
+            v = np.concatenate([v, v_m])
+
+            trimesh.Trimesh(faces=f, vertices=v, process=False).export(canon)
 
     def get_heatmap(self, values):
         l2 = tensor2im(values)
@@ -539,6 +556,7 @@ class Tracker(object):
                     logs.append(f"Color loss for level {k} [frame {str(self.frame).zfill(4)}] =" + reduce(lambda a, b: a + f' {b}={round(losses[b].item(), 4)}', [""] + list(losses.keys())))
 
                 loss_color = all_loss.item()
+                self.loss_all = loss_color
 
                 if loss_color < best_loss:
                     best_loss = loss_color
