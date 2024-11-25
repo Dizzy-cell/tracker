@@ -29,5 +29,15 @@ rootgg/plik
     -images
 
 -output
-    -checkpoin
+    -checkpoint
     -canonical.obj
+
+#blendObj from the paper "emage" 
+
+# tracker mesh 
+python tracker_blend.py --cfg ./configs/actors/id2.yml
+
+
+tri = Delaunay(v_mouth)
+f_mouth = tri.simplices
+
